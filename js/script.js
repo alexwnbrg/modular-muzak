@@ -185,15 +185,14 @@ function setupInterface() {
 
     select.addEventListener("change", async () => {
       const index = parseInt(select.value, 10);
-    
       const oldPlayer = currentPlayers[category];
+    
       // Stop Old Player
       if (oldPlayer) {
         oldPlayer.stop();
       }
     
       try {
-        // Load the new stem fully
         const newPlayer = await loadStem(category, index);
         currentPlayers[category] = newPlayer;
     
@@ -205,24 +204,26 @@ function setupInterface() {
         newPlayer.connect(meters[category]);
         newPlayer.connect(mainGain);
     
-        // Recompute currentTime after the stem is fully loaded
+        // Compute currentTime after the stem is fully loaded
         const currentTime = Tone.Transport.seconds;
     
         if (isPlaying && newPlayer.buffer) {
-          // Calculate the relative position now that the new stem is ready
           const relativePosition = currentTime % newPlayer.buffer.duration;
           newPlayer.start(Tone.now(), relativePosition);
-          console.log(
-            `Playing ${category} stem ${index} at relative position ${relativePosition}`
-          );
         }
     
         // Update Card Image
         cardImage.src = `./cards/${category}${index}.jpg`;
     
-        // Dispose of old player if different from the new one
+        // Dispose of old player if it exists and is different from the new one
         if (oldPlayer && oldPlayer !== newPlayer) {
           oldPlayer.dispose();
+    
+          // Find the old player in players[category] and remove it
+          const oldIndex = players[category].indexOf(oldPlayer);
+          if (oldIndex !== -1) {
+            players[category][oldIndex] = null;
+          }
         }
     
       } catch (error) {
@@ -287,7 +288,6 @@ function setupInterface() {
   playButton.addEventListener("click", async () => {
     await Tone.start();
     Tone.Transport.start();
-    console.log("Playback started.");
     Object.values(currentPlayers).forEach((player) => {
       if (player && player.buffer) {
         const relativePosition = Tone.Transport.seconds % player.buffer.duration;
@@ -299,7 +299,6 @@ function setupInterface() {
 
   stopButton.addEventListener("click", () => {
     Tone.Transport.stop();
-    console.log("Playback stopped.");
     Object.values(currentPlayers).forEach((player) => player?.stop());
     isPlaying = false;
   });
