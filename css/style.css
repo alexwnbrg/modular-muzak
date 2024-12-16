@@ -243,6 +243,18 @@
       flex-direction: column;
       gap: 10px;
     }
+
+    #header {
+      font-size: medium;
+    }
+
+    .playButton {
+      font-size: small;
+    }
+
+    .stopButton {
+    font-size: small;
+    }
   }
   
   @media (max-width: 480px) {
@@ -250,11 +262,7 @@
       padding: 10px;
     }
   
-    .soloButton,
-    .muteButton {
-      padding: 8px 12px;
-      font-size: 12px;
-    }
+
   
     .playButton,
     .stopButton {
