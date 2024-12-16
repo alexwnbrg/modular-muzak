@@ -73,18 +73,49 @@ limiter.toDestination();
 
 let meters = {}; // To store a meter for each category
 
+// After setupInterface() call in DOMContentLoaded or after your interface is ready
 document.addEventListener("DOMContentLoaded", () => {
   setupInterface();
-  // After setting up the interface, load default stems for each category (index 0)
+
+  // Load default stems (index 0) for each category
   categories.forEach((category) => {
     loadStem(category, 0).then((player) => {
       currentPlayers[category] = player;
+      currentIndices[category] = 0;
       meters[category] = new Tone.Meter({ normalRange: true });
       currentPlayers[category].connect(meters[category]);
     }).catch((err) => console.error(err));
   });
-  document.getElementById("audio-container").style.display = "flex";
+
+  // Add the dice functionality
+  const dice = document.getElementById("dice");
+  if (dice) {
+    dice.style.cursor = "pointer";
+    dice.addEventListener("click", () => {
+      randomizeStems();
+    });
+  }
 });
+
+function randomizeStems() {
+  categories.forEach((category) => {
+    const maxIndex = categoryFileCounts[category]; // number of stems in this category
+    const randomIndex = Math.floor(Math.random() * maxIndex);
+
+    // Find the select element for this category
+    const categoryDiv = document.querySelector(`.category[data-category="${category}"]`);
+    if (categoryDiv) {
+      const select = categoryDiv.querySelector("select");
+      if (select) {
+        select.value = randomIndex;
+        // Trigger the change event to load and play the new stem
+        select.dispatchEvent(new Event("change"));
+      }
+    }
+  });
+}
+
+
 
 async function loadStem(category, index) {
   const loadingText = document.getElementById("loading-text");
