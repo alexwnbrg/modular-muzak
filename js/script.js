@@ -83,7 +83,7 @@ function preloadAudio() {
     players[category] = [];
     for (let i = 0; i < categoryFileCounts[category]; i++) {
       let player = new Tone.Player({
-        url: `./audio/${category}${i}.ogg`,
+        url: `./audio/${category}${i}.mp3`,
         loop: true,
         onload: () => {
           loadCount++;
