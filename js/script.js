@@ -8,6 +8,7 @@ let categories = [
   "EFX",
   "Breakdown",
 ];
+
 let categoryFileCounts = {
   Lead: 5,
   Bass: 4,
@@ -17,6 +18,7 @@ let categoryFileCounts = {
   EFX: 7,
   Breakdown: 8,
 };
+
 let categoryDisplayNames = {
   Lead: [ "Whistler", "The Visitor","The Traveler", "Sonic Voyage", "The Bull"],
   Bass: ["Bridge Plucker", "Subpumper", "Fat Bottom", "Bass Pusher"],
@@ -68,37 +70,52 @@ const mainGain = new Tone.Gain(2.4);
 const limiter = new Tone.Limiter(-1);
 mainGain.connect(limiter);
 limiter.toDestination();
-let loadCount = 0;
-let totalFiles = Object.values(categoryFileCounts).reduce((a, b) => a + b, 0);
 
 let meters = {}; // To store a meter for each category
 
 document.addEventListener("DOMContentLoaded", () => {
-  preloadAudio();
   setupInterface();
+  // After setting up the interface, load default stems for each category (index 0)
+  categories.forEach((category) => {
+    loadStem(category, 0).then((player) => {
+      currentPlayers[category] = player;
+      meters[category] = new Tone.Meter({ normalRange: true });
+      currentPlayers[category].connect(meters[category]);
+    }).catch((err) => console.error(err));
+  });
+  document.getElementById("audio-container").style.display = "flex";
 });
 
-function preloadAudio() {
-  categories.forEach((category) => {
+async function loadStem(category, index) {
+  const loadingText = document.getElementById("loading-text");
+  loadingText.style.display = "block";
+
+  if (!players[category]) {
     players[category] = [];
-    for (let i = 0; i < categoryFileCounts[category]; i++) {
-      let player = new Tone.Player({
-        url: `./audio/${category}${i}.mp3`,
-        loop: true,
-        onload: () => {
-          loadCount++;
-          if (loadCount === totalFiles) {
-            document.getElementById("loading-text").style.display = "none";
-            document.getElementById("audio-container").style.display = "flex";
-            console.log("All audio files loaded!");
-          }
-        },
-        onerror: (e) => {
-          console.error(`Error loading ${category}${i}:`, e);
-        },
-      }).connect(mainGain);
-      players[category].push(player);
-    }
+  }
+
+  // If already loaded, just return it
+  if (players[category][index]) {
+    loadingText.style.display = "none";
+    return players[category][index];
+  }
+
+  return new Promise((resolve, reject) => {
+    let player = new Tone.Player({
+      url: `./audio/${category}${index}.mp3`,
+      loop: true,
+      onload: () => {
+        loadingText.style.display = "none";
+        player.connect(mainGain);
+        players[category][index] = player;
+        resolve(player);
+      },
+      onerror: (e) => {
+        console.error(`Error loading ${category}${index}:`, e);
+        loadingText.style.display = "none";
+        reject(e);
+      },
+    });
   });
 }
 
@@ -106,7 +123,6 @@ function setupInterface() {
   const audioContainer = document.getElementById("audio-container");
 
   categories.forEach((category) => {
-    // Initialize mute and solo states
     soloStates[category] = false;
     muteStates[category] = false;
 
@@ -123,10 +139,10 @@ function setupInterface() {
 
     // Dropdown Selector
     const select = document.createElement("select");
-    categoryDisplayNames[category].forEach((name, index) => {
+    categoryDisplayNames[category].forEach((name, idx) => {
       const option = document.createElement("option");
       option.textContent = name;
-      option.value = index;
+      option.value = idx;
       select.appendChild(option);
     });
     categoryDiv.appendChild(select);
@@ -167,39 +183,51 @@ function setupInterface() {
     cardImage.alt = `${category} card image`;
     categoryDiv.appendChild(cardImage);
 
-    // Set default stem
-    currentPlayers[category] = players[category][0];
-
-    // Create a meter and connect the player to it
-    meters[category] = new Tone.Meter({ normalRange: true });
-    currentPlayers[category].connect(meters[category]);
-
-    // Event Listeners
-    select.addEventListener("change", () => {
-      const index = select.selectedIndex;
-      const currentTime = Tone.Transport.seconds;
-
-      // Stop Previous Player
-      if (currentPlayers[category]) {
-        currentPlayers[category].stop();
+    select.addEventListener("change", async () => {
+      const index = parseInt(select.value, 10);
+    
+      const oldPlayer = currentPlayers[category];
+      // Stop Old Player
+      if (oldPlayer) {
+        oldPlayer.stop();
       }
-
-      // Start New Player at Relative Time
-      currentPlayers[category] = players[category][index];
-      // Connect the new player to the meter
-      currentPlayers[category].connect(meters[category]);
-
-      if (isPlaying) {
-        const relativePosition =
-          currentTime % currentPlayers[category].buffer.duration;
-        currentPlayers[category].start(Tone.now(), relativePosition);
-        console.log(
-          `Playing ${category} stem ${index} at relative position ${relativePosition}`
-        );
+    
+      try {
+        // Load the new stem fully
+        const newPlayer = await loadStem(category, index);
+        currentPlayers[category] = newPlayer;
+    
+        if (!meters[category]) {
+          meters[category] = new Tone.Meter({ normalRange: true });
+        }
+    
+        newPlayer.disconnect();
+        newPlayer.connect(meters[category]);
+        newPlayer.connect(mainGain);
+    
+        // Recompute currentTime after the stem is fully loaded
+        const currentTime = Tone.Transport.seconds;
+    
+        if (isPlaying && newPlayer.buffer) {
+          // Calculate the relative position now that the new stem is ready
+          const relativePosition = currentTime % newPlayer.buffer.duration;
+          newPlayer.start(Tone.now(), relativePosition);
+          console.log(
+            `Playing ${category} stem ${index} at relative position ${relativePosition}`
+          );
+        }
+    
+        // Update Card Image
+        cardImage.src = `./cards/${category}${index}.jpg`;
+    
+        // Dispose of old player if different from the new one
+        if (oldPlayer && oldPlayer !== newPlayer) {
+          oldPlayer.dispose();
+        }
+    
+      } catch (error) {
+        console.error("Failed to load stem:", error);
       }
-
-      // Update Card Image
-      cardImage.src = `./cards/${category}${index}.jpg`;
     });
 
     volumeSlider.addEventListener("input", () => {
@@ -227,7 +255,6 @@ function setupInterface() {
         // Unsolo
         categories.forEach((cat) => {
           if (currentPlayers[cat]) {
-            // revert to mute state before solo
             currentPlayers[cat].mute = muteStates[cat];
           }
         });
@@ -262,9 +289,8 @@ function setupInterface() {
     Tone.Transport.start();
     console.log("Playback started.");
     Object.values(currentPlayers).forEach((player) => {
-      if (player) {
-        const relativePosition =
-          Tone.Transport.seconds % player.buffer.duration;
+      if (player && player.buffer) {
+        const relativePosition = Tone.Transport.seconds % player.buffer.duration;
         player.start(Tone.now(), relativePosition);
       }
     });
@@ -278,4 +304,3 @@ function setupInterface() {
     isPlaying = false;
   });
 }
-
