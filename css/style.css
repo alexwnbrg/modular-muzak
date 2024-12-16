@@ -181,6 +181,8 @@
     transform: scale(1.1);
   }
   
+
+
   /* Play/Stop Controls */
   .control-wrapper {
     display: flex;
@@ -244,25 +246,34 @@
       gap: 10px;
     }
 
-    #header {
-      font-size: medium;
+    #header-controls {
+      display: flex;
+      flex-direction: column;
+      flex-wrap: wrap; 
+      gap: 20px; 
+      width: 100%;
+    }
+    
+    #grid-1 {
+      flex: 1 1 100%; /* Take full width of the row */
+      order: 1; 
+    }
+    #grid-2 {
+      flex: 1 1 calc(50% - 10px); /* Take half the width of the container minus gap adjustment */
+      order: 2; /* Explicitly set the order */
+    }
+    
+    #grid-3 {
+      flex: 1 1 calc(50% - 10px); /* Take half the width of the container minus gap adjustment */
+      order: 3; /* Explicitly set the order */
     }
 
-    .playButton {
-      font-size: small;
-    }
-
-    .stopButton {
-    font-size: small;
-    }
   }
   
   @media (max-width: 480px) {
     .category {
       padding: 10px;
     }
-  
-
   
     .playButton,
     .stopButton {
