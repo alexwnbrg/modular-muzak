@@ -75,7 +75,7 @@ const limiter = new Tone.Limiter(-1);
 mainGain.connect(limiter);
 limiter.toDestination();
 
-let meters = {}; // To store a meter for each category
+let analysers = {}; // To store an analyser for each category
 
 // After setupInterface() call in DOMContentLoaded or after your interface is ready
 document.addEventListener("DOMContentLoaded", () => {
@@ -87,8 +87,8 @@ document.addEventListener("DOMContentLoaded", () => {
     loadStem(category, 0).then((player) => {
       currentPlayers[category] = player;
       currentIndices[category] = 0;
-      meters[category] = new Tone.Meter({ normalRange: true, smoothing: 0 });
-      currentPlayers[category].connect(meters[category]);
+      analysers[category] = new Tone.Analyser("waveform", 512);
+      currentPlayers[category].connect(analysers[category]);
     }).catch((err) => console.error(err));
   });
 
@@ -227,12 +227,12 @@ function setupInterface() {
         const newPlayer = await loadStem(category, index);
         currentPlayers[category] = newPlayer;
     
-        if (!meters[category]) {
-          meters[category] = new Tone.Meter({ normalRange: true, smoothing: 0 });
+        if (!analysers[category]) {
+          analysers[category] = new Tone.Analyser("waveform", 512);
         }
-    
+
         newPlayer.disconnect();
-        newPlayer.connect(meters[category]);
+        newPlayer.connect(analysers[category]);
         newPlayer.connect(mainGain);
     
         // Compute currentTime after the stem is fully loaded
@@ -339,17 +339,18 @@ function startVisualization() {
       if (!categoryDiv) return;
 
       let level = 0;
-      if (isPlaying && meters[category]) {
-        const raw = meters[category].getValue();
-        const scalar = Array.isArray(raw) ? Math.max(...raw) : raw;
-        const clamped = typeof scalar === "number" && isFinite(scalar) ? Math.max(0, Math.min(1, scalar)) : 0;
-        // Boost: scale up and apply a curve so quieter signals register
-        level = Math.min(1, clamped * 6);
-        level = Math.pow(level, 0.5); // curve to make quiet parts more visible
+      if (isPlaying && analysers[category]) {
+        const waveform = analysers[category].getValue();
+        // Compute RMS from raw samples — immediate, no internal smoothing
+        let sum = 0;
+        for (let i = 0; i < waveform.length; i++) sum += waveform[i] * waveform[i];
+        const rms = Math.sqrt(sum / waveform.length);
+        level = Math.min(1, rms * 8);
+        level = Math.pow(level, 0.5);
       }
 
-      // Fast attack, quicker decay so it tracks individual hits
-      const alpha = level > smoothedLevels[category] ? 0.75 : 0.18;
+      // Fast attack, fast decay so it snaps with each hit
+      const alpha = level > smoothedLevels[category] ? 0.8 : 0.25;
       smoothedLevels[category] = smoothedLevels[category] * (1 - alpha) + level * alpha;
       const s = smoothedLevels[category];
 
