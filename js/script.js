@@ -68,6 +68,8 @@ let muteStates = {};
 let isPlaying = false;
 let smoothedLevels = {};
 
+Tone.context.lookAhead = 0;
+
 const mainGain = new Tone.Gain(2.4);
 const limiter = new Tone.Limiter(-1);
 mainGain.connect(limiter);
@@ -85,7 +87,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadStem(category, 0).then((player) => {
       currentPlayers[category] = player;
       currentIndices[category] = 0;
-      meters[category] = new Tone.Meter({ normalRange: true });
+      meters[category] = new Tone.Meter({ normalRange: true, smoothing: 0 });
       currentPlayers[category].connect(meters[category]);
     }).catch((err) => console.error(err));
   });
@@ -226,7 +228,7 @@ function setupInterface() {
         currentPlayers[category] = newPlayer;
     
         if (!meters[category]) {
-          meters[category] = new Tone.Meter({ normalRange: true });
+          meters[category] = new Tone.Meter({ normalRange: true, smoothing: 0 });
         }
     
         newPlayer.disconnect();
