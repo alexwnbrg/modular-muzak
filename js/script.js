@@ -75,7 +75,6 @@ const limiter = new Tone.Limiter(-1);
 mainGain.connect(limiter);
 limiter.toDestination();
 
-let analysers = {}; // To store an analyser for each category
 
 // After setupInterface() call in DOMContentLoaded or after your interface is ready
 document.addEventListener("DOMContentLoaded", () => {
@@ -87,8 +86,6 @@ document.addEventListener("DOMContentLoaded", () => {
     loadStem(category, 0).then((player) => {
       currentPlayers[category] = player;
       currentIndices[category] = 0;
-      analysers[category] = new Tone.Analyser("waveform", 512);
-      currentPlayers[category].connect(analysers[category]);
     }).catch((err) => console.error(err));
   });
 
@@ -227,12 +224,7 @@ function setupInterface() {
         const newPlayer = await loadStem(category, index);
         currentPlayers[category] = newPlayer;
     
-        if (!analysers[category]) {
-          analysers[category] = new Tone.Analyser("waveform", 512);
-        }
-
         newPlayer.disconnect();
-        newPlayer.connect(analysers[category]);
         newPlayer.connect(mainGain);
     
         // Compute currentTime after the stem is fully loaded
@@ -333,23 +325,37 @@ function setupInterface() {
 }
 
 function startVisualization() {
+  const WINDOW = 1024; // samples to read per frame (~23ms at 44100Hz)
+
   function animate() {
     categories.forEach((category) => {
       const categoryDiv = document.querySelector(`.category[data-category="${category}"]`);
       if (!categoryDiv) return;
 
       let level = 0;
-      if (isPlaying && analysers[category]) {
-        const waveform = analysers[category].getValue();
-        // Compute RMS from raw samples — immediate, no internal smoothing
+      const player = currentPlayers[category];
+
+      if (isPlaying && player && player.buffer && player.buffer.loaded) {
+        const audioBuffer = player.buffer.get(); // native AudioBuffer
+        const channelData = audioBuffer.getChannelData(0);
+        const sampleRate = audioBuffer.sampleRate;
+
+        // Where in the loop are we right now?
+        const position = Tone.Transport.seconds % audioBuffer.duration;
+        const frameIndex = Math.floor(position * sampleRate);
+
+        // RMS over a short window of samples
         let sum = 0;
-        for (let i = 0; i < waveform.length; i++) sum += waveform[i] * waveform[i];
-        const rms = Math.sqrt(sum / waveform.length);
+        for (let i = 0; i < WINDOW; i++) {
+          const s = channelData[Math.min(frameIndex + i, channelData.length - 1)];
+          sum += s * s;
+        }
+        const rms = Math.sqrt(sum / WINDOW);
         level = Math.min(1, rms * 8);
         level = Math.pow(level, 0.5);
       }
 
-      // Fast attack, fast decay so it snaps with each hit
+      // Fast attack, fast decay
       const alpha = level > smoothedLevels[category] ? 0.8 : 0.25;
       smoothedLevels[category] = smoothedLevels[category] * (1 - alpha) + level * alpha;
       const s = smoothedLevels[category];
@@ -360,8 +366,7 @@ function startVisualization() {
       const b = Math.round(232 + s *  15);
       const color = `rgb(${r}, ${g}, ${b})`;
       categoryDiv.style.borderColor = color;
-      const glowPx = (5 + s * 15).toFixed(1);
-      categoryDiv.style.boxShadow = `0 0 ${glowPx}px ${color}`;
+      categoryDiv.style.boxShadow = `0 0 ${(5 + s * 15).toFixed(1)}px ${color}`;
     });
 
     requestAnimationFrame(animate);
