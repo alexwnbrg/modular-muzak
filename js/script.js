@@ -68,6 +68,10 @@ let muteStates = {};
 let isPlaying = false;
 let smoothedLevels = {};
 
+// One analyser per category — reads actual live audio output,
+// no position calculation needed so it can never freeze or drift
+let analysers = {};
+
 Tone.context.lookAhead = 0;
 
 const mainGain = new Tone.Gain(2.4);
@@ -75,23 +79,47 @@ const limiter = new Tone.Limiter(-1);
 mainGain.connect(limiter);
 limiter.toDestination();
 
-
-// After setupInterface() call in DOMContentLoaded or after your interface is ready
 document.addEventListener("DOMContentLoaded", () => {
+  // Create one analyser per category and wire it into the signal chain:
+  // player → analyser → mainGain → limiter → destination
+  categories.forEach((cat) => {
+    smoothedLevels[cat] = 0;
+    const analyser = new Tone.Analyser("waveform", 256);
+    analyser.smoothing = 0; // no built-in smoothing; we do our own
+    analyser.connect(mainGain);
+    analysers[cat] = analyser;
+  });
+
   setupInterface();
 
-  // Load default stems (index 0) for each category
-  categories.forEach((category) => {
-    smoothedLevels[category] = 0;
-    loadStem(category, 0).then((player) => {
+  const playButton = document.querySelector(".playButton");
+  const loadingText = document.getElementById("loading-text");
+  playButton.disabled = true;
+  playButton.style.opacity = "0.4";
+  playButton.style.cursor = "not-allowed";
+
+  let loadedCount = 0;
+  loadingText.textContent = `Loading stems... (0 / ${categories.length})`;
+  loadingText.style.display = "block";
+
+  const loadPromises = categories.map((category) => {
+    return loadStem(category, 0).then((player) => {
       currentPlayers[category] = player;
       currentIndices[category] = 0;
-    }).catch((err) => console.error(err));
+      loadedCount++;
+      loadingText.textContent = `Loading stems... (${loadedCount} / ${categories.length})`;
+    });
   });
+
+  Promise.all(loadPromises).then(() => {
+    loadingText.style.display = "none";
+    playButton.disabled = false;
+    playButton.style.opacity = "1";
+    playButton.style.cursor = "pointer";
+  }).catch((err) => console.error(err));
 
   startVisualization();
 
-  // Add the dice functionality
   const dice = document.getElementById("dice");
   if (dice) {
     dice.style.cursor = "pointer";
@@ -103,35 +131,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function randomizeStems() {
   categories.forEach((category) => {
-    const maxIndex = categoryFileCounts[category]; // number of stems in this category
+    const maxIndex = categoryFileCounts[category];
     const randomIndex = Math.floor(Math.random() * maxIndex);
-
-    // Find the select element for this category
     const categoryDiv = document.querySelector(`.category[data-category="${category}"]`);
     if (categoryDiv) {
       const select = categoryDiv.querySelector("select");
       if (select) {
         select.value = randomIndex;
-        // Trigger the change event to load and play the new stem
         select.dispatchEvent(new Event("change"));
       }
     }
   });
 }
 
-
-
 async function loadStem(category, index) {
-  const loadingText = document.getElementById("loading-text");
-  loadingText.style.display = "block";
-
   if (!players[category]) {
     players[category] = [];
   }
 
-  // If already loaded, just return it
   if (players[category][index]) {
-    loadingText.style.display = "none";
     return players[category][index];
   }
 
@@ -140,14 +158,14 @@ async function loadStem(category, index) {
       url: `./audio/${category}${index}.mp3`,
       loop: true,
       onload: () => {
-        loadingText.style.display = "none";
-        player.connect(mainGain);
+        // Route through this category's analyser so visualization
+        // reads actual live output for this stem
+        player.connect(analysers[category]);
         players[category][index] = player;
         resolve(player);
       },
       onerror: (e) => {
         console.error(`Error loading ${category}${index}:`, e);
-        loadingText.style.display = "none";
         reject(e);
       },
     });
@@ -166,13 +184,11 @@ function setupInterface() {
     categoryDiv.setAttribute("data-category", category);
     audioContainer.appendChild(categoryDiv);
 
-    // Category Label
     const label = document.createElement("p");
     label.textContent = category;
     label.className = "label";
     categoryDiv.appendChild(label);
 
-    // Dropdown Selector
     const select = document.createElement("select");
     categoryDisplayNames[category].forEach((name, idx) => {
       const option = document.createElement("option");
@@ -182,7 +198,6 @@ function setupInterface() {
     });
     categoryDiv.appendChild(select);
 
-    // Volume Slider
     const volumeWrapper = document.createElement("div");
     volumeWrapper.className = "volume-wrapper";
     const volumeSlider = document.createElement("input");
@@ -195,7 +210,6 @@ function setupInterface() {
     categoryDiv.appendChild(volumeWrapper);
     volumeSliders[category] = volumeSlider;
 
-    // Mute and Solo Buttons
     const soloMuteWrapper = document.createElement("div");
     soloMuteWrapper.className = "solo-mute-wrapper";
 
@@ -214,66 +228,55 @@ function setupInterface() {
     select.addEventListener("change", async () => {
       const index = parseInt(select.value, 10);
       const oldPlayer = currentPlayers[category];
-    
-      // Stop Old Player
+
       if (oldPlayer) {
         oldPlayer.stop();
       }
-    
+
       try {
         const newPlayer = await loadStem(category, index);
         currentPlayers[category] = newPlayer;
-    
+        currentIndices[category] = index;
+
+        // Reconnect through the category analyser
         newPlayer.disconnect();
-        newPlayer.connect(mainGain);
-    
-        // Compute currentTime after the stem is fully loaded
-        const currentTime = Tone.Transport.seconds;
-    
+        newPlayer.connect(analysers[category]);
+
         if (isPlaying && newPlayer.buffer) {
-          const relativePosition = currentTime % newPlayer.buffer.duration;
+          const relativePosition = Tone.Transport.seconds % newPlayer.buffer.duration;
           newPlayer.start(Tone.now(), relativePosition);
         }
-    
-        // Dispose of old player if it exists and is different from the new one
+
         if (oldPlayer && oldPlayer !== newPlayer) {
           oldPlayer.dispose();
-    
-          // Find the old player in players[category] and remove it
           const oldIndex = players[category].indexOf(oldPlayer);
           if (oldIndex !== -1) {
             players[category][oldIndex] = null;
           }
         }
-    
+
       } catch (error) {
         console.error("Failed to load stem:", error);
       }
     });
 
     volumeSlider.addEventListener("input", () => {
-      const volume = volumeSlider.value;
       if (currentPlayers[category]) {
-        currentPlayers[category].volume.value = volume;
+        currentPlayers[category].volume.value = volumeSlider.value;
       }
     });
 
     soloButton.addEventListener("click", () => {
-      const isSolo = soloStates[category];
-      soloStates[category] = !isSolo;
+      soloStates[category] = !soloStates[category];
 
       if (soloStates[category]) {
-        // Solo the category
         categories.forEach((cat) => {
-          if (cat !== category) {
-            if (currentPlayers[cat]) {
-              currentPlayers[cat].mute = true;
-            }
+          if (cat !== category && currentPlayers[cat]) {
+            currentPlayers[cat].mute = true;
           }
         });
         soloButton.textContent = "Unsolo";
       } else {
-        // Unsolo
         categories.forEach((cat) => {
           if (currentPlayers[cat]) {
             currentPlayers[cat].mute = muteStates[cat];
@@ -284,24 +287,14 @@ function setupInterface() {
     });
 
     muteButton.addEventListener("click", () => {
-      const isMuted = muteStates[category];
-      muteStates[category] = !isMuted;
-
-      if (isMuted) {
-        if (currentPlayers[category]) {
-          currentPlayers[category].mute = false;
-        }
-        muteButton.textContent = "Mute";
-      } else {
-        if (currentPlayers[category]) {
-          currentPlayers[category].mute = true;
-        }
-        muteButton.textContent = "Unmute";
+      muteStates[category] = !muteStates[category];
+      if (currentPlayers[category]) {
+        currentPlayers[category].mute = muteStates[category];
       }
+      muteButton.textContent = muteStates[category] ? "Unmute" : "Mute";
     });
   });
 
-  // Play/Stop Buttons
   const playButton = document.querySelector(".playButton");
   const stopButton = document.querySelector(".stopButton");
 
@@ -310,8 +303,7 @@ function setupInterface() {
     Tone.Transport.start();
     Object.values(currentPlayers).forEach((player) => {
       if (player && player.buffer) {
-        const relativePosition = Tone.Transport.seconds % player.buffer.duration;
-        player.start(Tone.now(), relativePosition);
+        player.start(Tone.now(), 0);
       }
     });
     isPlaying = true;
@@ -325,38 +317,40 @@ function setupInterface() {
 }
 
 function startVisualization() {
-  const WINDOW = 1024; // samples to read per frame (~23ms at 44100Hz)
+  // Cache DOM refs once — no need to query every frame
+  const categoryDivs = {};
+  categories.forEach((cat) => {
+    categoryDivs[cat] = document.querySelector(`.category[data-category="${cat}"]`);
+  });
+
+  // Reusable buffer so we don't allocate on every frame
+  const waveformBuffers = {};
+  categories.forEach((cat) => {
+    waveformBuffers[cat] = new Float32Array(256);
+  });
 
   function animate() {
     categories.forEach((category) => {
-      const categoryDiv = document.querySelector(`.category[data-category="${category}"]`);
+      const categoryDiv = categoryDivs[category];
       if (!categoryDiv) return;
 
       let level = 0;
-      const player = currentPlayers[category];
 
-      if (isPlaying && player && player.buffer && player.buffer.loaded) {
-        const audioBuffer = player.buffer.get(); // native AudioBuffer
-        const channelData = audioBuffer.getChannelData(0);
-        const sampleRate = audioBuffer.sampleRate;
-
-        // Where in the loop are we right now?
-        const position = Tone.Transport.seconds % audioBuffer.duration;
-        const frameIndex = Math.floor(position * sampleRate);
-
-        // RMS over a short window of samples
+      if (isPlaying && analysers[category]) {
+        // getValue() returns the actual waveform data being output right now —
+        // no timing calculation, no position drift, no freezing
+        const data = analysers[category].getValue();
         let sum = 0;
-        for (let i = 0; i < WINDOW; i++) {
-          const s = channelData[Math.min(frameIndex + i, channelData.length - 1)];
-          sum += s * s;
-        }
-        const rms = Math.sqrt(sum / WINDOW);
-        level = Math.min(1, rms * 8);
+        for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+        const rms = Math.sqrt(sum / data.length);
+
+        // Boost and shape the level
+        level = Math.min(1, rms * 60);
         level = Math.pow(level, 0.5);
       }
 
-      // Fast attack, fast decay
-      const alpha = level > smoothedLevels[category] ? 0.8 : 0.25;
+      // Fast attack, faster decay back to cyan
+      const alpha = level > smoothedLevels[category] ? 0.8 : 0.18;
       smoothedLevels[category] = smoothedLevels[category] * (1 - alpha) + level * alpha;
       const s = smoothedLevels[category];
 
@@ -371,5 +365,6 @@ function startVisualization() {
 
     requestAnimationFrame(animate);
   }
+
   animate();
 }
