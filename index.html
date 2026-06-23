@@ -25,14 +25,14 @@
         </section>
     </main>
     <script src="./js/script.js?v=15"></script>
-    <script>
-  window.addEventListener('load', function () {
-    setTimeout(function () {
-      window.parent.postMessage(
-        { muzakHeight: document.body.clientHeight }, '*'
-      );
-    }, 200);
-  });
+<script>
+  function sendHeight() {
+    window.parent.postMessage(
+      { muzakHeight: document.body.scrollHeight }, '*'
+    );
+  }
+  window.addEventListener('load', function () { setTimeout(sendHeight, 200); });
+  window.addEventListener('resize', sendHeight);
 </script>
 </body>
 </html>
