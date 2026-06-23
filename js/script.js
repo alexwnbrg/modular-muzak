@@ -363,8 +363,9 @@ function startVisualization() {
       categoryDiv.style.boxShadow = `0 0 ${(5 + s * 15).toFixed(1)}px ${color}`;
     });
 
-    requestAnimationFrame(animate);
   }
 
-  animate();
+  // setInterval instead of requestAnimationFrame — avoids rAF throttling
+  // that GitHub Pages and some CDN environments apply to the rendering pipeline
+  setInterval(animate, 16);
 }

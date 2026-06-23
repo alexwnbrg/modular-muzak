@@ -80,9 +80,9 @@
     border-radius: 10px;
     background-color: #02001C;
     box-shadow: 0 0 5px #02e1e8;
-    transition: transform 0.2s ease-in-out;
+    transition: transform 0.2s ease-in-out, border-color 0.15s ease-out, box-shadow 0.15s ease-out;
   }
-  
+
   .category:hover {
     transform: scale(1.05);
   }
