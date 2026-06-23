@@ -26,13 +26,13 @@
     </main>
     <script src="./js/script.js?v=15"></script>
 <script>
-  function sendHeight() {
-    window.parent.postMessage(
-      { muzakHeight: document.body.scrollHeight }, '*'
-    );
-  }
-  window.addEventListener('load', function () { setTimeout(sendHeight, 200); });
-  window.addEventListener('resize', sendHeight);
+  window.addEventListener('load', function () {
+    setTimeout(function () {
+      window.parent.postMessage(
+        { muzakHeight: document.body.scrollHeight }, '*'
+      );
+    }, 200);
+  });
 </script>
 </body>
 </html>
