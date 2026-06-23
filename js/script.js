@@ -345,12 +345,12 @@ function startVisualization() {
         const rms = Math.sqrt(sum / data.length);
 
         // Boost and shape the level
-        level = Math.min(1, rms * 35);
+        level = Math.min(1, rms * 55);
         level = Math.pow(level, 0.5);
       }
 
-      // Fast attack, snappy decay so quiet gaps between hits show clearly
-      const alpha = level > smoothedLevels[category] ? 0.8 : 0.4;
+      // Fast attack, snappy decay
+      const alpha = level > smoothedLevels[category] ? 0.8 : 0.45;
       smoothedLevels[category] = smoothedLevels[category] * (1 - alpha) + level * alpha;
       const s = smoothedLevels[category];
 
