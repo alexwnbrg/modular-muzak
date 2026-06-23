@@ -25,5 +25,16 @@
         </section>
     </main>
     <script src="./js/script.js?v=15"></script>
+    <script>
+      function sendHeight() {
+        window.parent.postMessage(
+          { muzakHeight: document.documentElement.scrollHeight }, '*'
+        );
+      }
+      sendHeight();
+      if (window.ResizeObserver) {
+        new ResizeObserver(sendHeight).observe(document.body);
+      }
+    </script>
 </body>
 </html>
