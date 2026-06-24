@@ -66,11 +66,6 @@ let volumeSliders = {};
 let soloStates = {};
 let muteStates = {};
 let isPlaying = false;
-let smoothedLevels = {};
-
-// One analyser per category — reads actual live audio output,
-// no position calculation needed so it can never freeze or drift
-let analysers = {};
 
 Tone.context.lookAhead = 0;
 
@@ -80,16 +75,6 @@ mainGain.connect(limiter);
 limiter.toDestination();
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Create one analyser per category and wire it into the signal chain:
-  // player → analyser → mainGain → limiter → destination
-  categories.forEach((cat) => {
-    smoothedLevels[cat] = 0;
-    const analyser = new Tone.Analyser("waveform", 256);
-    analyser.smoothing = 0; // no built-in smoothing; we do our own
-    analyser.connect(mainGain);
-    analysers[cat] = analyser;
-  });
-
   setupInterface();
 
   const playButton = document.querySelector(".playButton");
@@ -118,14 +103,10 @@ document.addEventListener("DOMContentLoaded", () => {
     playButton.style.cursor = "pointer";
   }).catch((err) => console.error(err));
 
-  startVisualization();
-
   const dice = document.getElementById("dice");
   if (dice) {
     dice.style.cursor = "pointer";
-    dice.addEventListener("click", () => {
-      randomizeStems();
-    });
+    dice.addEventListener("click", () => randomizeStems());
   }
 });
 
@@ -145,22 +126,15 @@ function randomizeStems() {
 }
 
 async function loadStem(category, index) {
-  if (!players[category]) {
-    players[category] = [];
-  }
-
-  if (players[category][index]) {
-    return players[category][index];
-  }
+  if (!players[category]) players[category] = [];
+  if (players[category][index]) return players[category][index];
 
   return new Promise((resolve, reject) => {
     let player = new Tone.Player({
       url: `./audio/${category}${index}.mp3`,
       loop: true,
       onload: () => {
-        // Route through this category's analyser so visualization
-        // reads actual live output for this stem
-        player.connect(analysers[category]);
+        player.connect(mainGain);
         players[category][index] = player;
         resolve(player);
       },
@@ -228,19 +202,15 @@ function setupInterface() {
     select.addEventListener("change", async () => {
       const index = parseInt(select.value, 10);
       const oldPlayer = currentPlayers[category];
-
-      if (oldPlayer) {
-        oldPlayer.stop();
-      }
+      if (oldPlayer) oldPlayer.stop();
 
       try {
         const newPlayer = await loadStem(category, index);
         currentPlayers[category] = newPlayer;
         currentIndices[category] = index;
 
-        // Reconnect through the category analyser
         newPlayer.disconnect();
-        newPlayer.connect(analysers[category]);
+        newPlayer.connect(mainGain);
 
         if (isPlaying && newPlayer.buffer) {
           const relativePosition = Tone.Transport.seconds % newPlayer.buffer.duration;
@@ -250,11 +220,8 @@ function setupInterface() {
         if (oldPlayer && oldPlayer !== newPlayer) {
           oldPlayer.dispose();
           const oldIndex = players[category].indexOf(oldPlayer);
-          if (oldIndex !== -1) {
-            players[category][oldIndex] = null;
-          }
+          if (oldIndex !== -1) players[category][oldIndex] = null;
         }
-
       } catch (error) {
         console.error("Failed to load stem:", error);
       }
@@ -268,19 +235,14 @@ function setupInterface() {
 
     soloButton.addEventListener("click", () => {
       soloStates[category] = !soloStates[category];
-
       if (soloStates[category]) {
         categories.forEach((cat) => {
-          if (cat !== category && currentPlayers[cat]) {
-            currentPlayers[cat].mute = true;
-          }
+          if (cat !== category && currentPlayers[cat]) currentPlayers[cat].mute = true;
         });
         soloButton.textContent = "Unsolo";
       } else {
         categories.forEach((cat) => {
-          if (currentPlayers[cat]) {
-            currentPlayers[cat].mute = muteStates[cat];
-          }
+          if (currentPlayers[cat]) currentPlayers[cat].mute = muteStates[cat];
         });
         soloButton.textContent = "Solo";
       }
@@ -288,9 +250,7 @@ function setupInterface() {
 
     muteButton.addEventListener("click", () => {
       muteStates[category] = !muteStates[category];
-      if (currentPlayers[category]) {
-        currentPlayers[category].mute = muteStates[category];
-      }
+      if (currentPlayers[category]) currentPlayers[category].mute = muteStates[category];
       muteButton.textContent = muteStates[category] ? "Unmute" : "Mute";
     });
   });
@@ -302,9 +262,7 @@ function setupInterface() {
     await Tone.start();
     Tone.Transport.start();
     Object.values(currentPlayers).forEach((player) => {
-      if (player && player.buffer) {
-        player.start(Tone.now(), 0);
-      }
+      if (player && player.buffer) player.start(Tone.now(), 0);
     });
     isPlaying = true;
   });
@@ -314,58 +272,4 @@ function setupInterface() {
     Object.values(currentPlayers).forEach((player) => player?.stop());
     isPlaying = false;
   });
-}
-
-function startVisualization() {
-  // Cache DOM refs once — no need to query every frame
-  const categoryDivs = {};
-  categories.forEach((cat) => {
-    categoryDivs[cat] = document.querySelector(`.category[data-category="${cat}"]`);
-  });
-
-  // Reusable buffer so we don't allocate on every frame
-  const waveformBuffers = {};
-  categories.forEach((cat) => {
-    waveformBuffers[cat] = new Float32Array(256);
-  });
-
-  function animate() {
-    categories.forEach((category) => {
-      const categoryDiv = categoryDivs[category];
-      if (!categoryDiv) return;
-
-      let level = 0;
-
-      if (isPlaying && analysers[category]) {
-        // getValue() returns the actual waveform data being output right now —
-        // no timing calculation, no position drift, no freezing
-        const data = analysers[category].getValue();
-        let sum = 0;
-        for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
-        const rms = Math.sqrt(sum / data.length);
-
-        // Boost and shape the level
-        level = Math.min(1, rms * 55);
-        level = Math.pow(level, 0.5);
-      }
-
-      // Fast attack, snappy decay
-      const alpha = level > smoothedLevels[category] ? 0.8 : 0.45;
-      smoothedLevels[category] = smoothedLevels[category] * (1 - alpha) + level * alpha;
-      const s = smoothedLevels[category];
-
-      // Interpolate border: cyan (#02e1e8) → magenta (#f708f7)
-      const r = Math.round(2   + s * 245);
-      const g = Math.round(225 - s * 217);
-      const b = Math.round(232 + s *  15);
-      const color = `rgb(${r}, ${g}, ${b})`;
-      categoryDiv.style.borderColor = color;
-      categoryDiv.style.boxShadow = `0 0 ${(5 + s * 15).toFixed(1)}px ${color}`;
-    });
-
-  }
-
-  // setInterval instead of requestAnimationFrame — avoids rAF throttling
-  // that GitHub Pages and some CDN environments apply to the rendering pipeline
-  setInterval(animate, 16);
 }
